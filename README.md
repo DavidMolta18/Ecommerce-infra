@@ -148,5 +148,6 @@ Al finalizar el despliegue, deberías tener:
 Si deseas agregar nuevos ambientes (dev, staging, prod), simplemente cambia el valor de `"Environment"` en `params.json`.
 
 [Link repositorio frontend](https://github.com/DavidMolta18/Ecommerce-frontend.git)
-[Link repositorio backend][(https://github.com/DavidMolta18/Ecommerce-backend.git)
+
+[Link repositorio backend](https://github.com/DavidMolta18/Ecommerce-backend.git)
 
