@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Base de datos MySQL para E-commerce'
+
+Parameters:
+  Environment:
+    Type: String
+  DBInstanceClass:
+    Type: String
+  DatabaseName:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  DatabasePassword:
+    Type: String
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Grupo de subredes privadas para RDS'
+      SubnetIds:
+        - !ImportValue prod-db-subnet1-id
+        - !ImportValue prod-db-subnet2-id
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-db-subnet-group'
+
+  MySQLDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${Environment}-mysql'
+      Engine: mysql
+      EngineVersion: 8.0
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VPCSecurityGroups:
+        - !ImportValue prod-db-sg-id
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      StorageType: gp2
+      MultiAZ: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-rds-instance'

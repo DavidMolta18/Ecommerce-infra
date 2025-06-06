@@ -1,0 +1,11 @@
+[
+  { "ParameterKey": "Environment", "ParameterValue": "prod" },
+  { "ParameterKey": "EC2InstanceType", "ParameterValue": "t2.micro" },
+  { "ParameterKey": "DBInstanceClass", "ParameterValue": "db.t3.micro" },
+  { "ParameterKey": "DatabaseName", "ParameterValue": "ecommercedb" },
+  { "ParameterKey": "DatabaseUsername", "ParameterValue": "admin" },
+  { "ParameterKey": "DatabasePassword", "ParameterValue": "MySecurePass123" },
+  { "ParameterKey": "KeyPairName", "ParameterValue": "vockey" },
+  { "ParameterKey": "AllowedCIDR", "ParameterValue": "0.0.0.0/0" },
+  { "ParameterKey": "AlertEmail", "ParameterValue": "dmh1802@outlook.es" }
+]

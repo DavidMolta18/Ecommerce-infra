@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Instancias EC2, Bastión, Auto Scaling y Launch Template'
+
+Parameters:
+  Environment:
+    Type: String
+  EC2InstanceType:
+    Type: String
+  KeyPairName:
+    Type: String
+  DatabaseName:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  DatabasePassword:
+    Type: String
+
+Resources:
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+      KeyName: !Ref KeyPairName
+      SubnetId: !ImportValue prod-pub-subnet1-id
+      SecurityGroupIds:
+        - !ImportValue prod-bastion-sg-id
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y mysql
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-bastion-host'
+
+  AppLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${Environment}-lt'
+      LaunchTemplateData:
+        ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+        InstanceType: !Ref EC2InstanceType
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !ImportValue prod-app-sg-id
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+            yum install -y nodejs git nginx
+            mkdir -p /opt/ecommerce
+            cd /opt/ecommerce
+            git clone https://github.com/DavidMolta18/Ecommerce-backend.git .
+            npm install
+            mkdir -p /var/www/html
+            cd /var/www/html
+            git clone https://github.com/DavidMolta18/Ecommerce-frontend.git .
+            systemctl enable nginx && systemctl start nginx
+            cat > /etc/systemd/system/ecommerce.service << EOF
+            [Unit]
+            Description=E-commerce Node.js
+            After=network.target
+            [Service]
+            Type=simple
+            User=ec2-user
+            WorkingDirectory=/opt/ecommerce
+            ExecStart=/usr/bin/node server.js
+            Restart=always
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            cat > /opt/ecommerce/.env << EOF
+            DB_HOST=${DBEndpoint}
+            DB_NAME=${DatabaseName}
+            DB_USER=${DatabaseUsername}
+            DB_PASSWORD=${DatabasePassword}
+            PORT=3000
+            EOF
+            systemctl daemon-reexec
+            systemctl enable ecommerce && systemctl start ecommerce
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${Environment}-asg'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AppLaunchTemplate
+        Version: !GetAtt AppLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 2
+      VPCZoneIdentifier:
+        - !ImportValue prod-priv-subnet1-id
+        - !ImportValue prod-priv-subnet2-id
+      TargetGroupARNs:
+        - !ImportValue prod-tg-arn
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-web-server'
+          PropagateAtLaunch: true
