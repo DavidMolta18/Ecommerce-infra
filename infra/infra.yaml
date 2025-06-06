@@ -579,7 +579,7 @@ Resources:
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName: !Ref AutoScalingGroup
-      Cooldown: 300
+      Cooldown: 60
       ScalingAdjustment: 1
       PolicyType: SimpleScaling
 
@@ -588,7 +588,7 @@ Resources:
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName: !Ref AutoScalingGroup
-      Cooldown: 300
+      Cooldown: 60
       ScalingAdjustment: -1
       PolicyType: SimpleScaling
 
@@ -642,6 +642,7 @@ Resources:
           Value: !Ref AutoScalingGroup
       AlarmActions:
         - !Ref ScaleDownPolicy
+        - !Ref AlertTopic
 
   # ====================== CLOUDTRAIL ======================
   CloudTrailLogsBucket:
