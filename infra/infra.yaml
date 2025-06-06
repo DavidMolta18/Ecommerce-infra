@@ -614,9 +614,9 @@ Resources:
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 70
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 50
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: AutoScalingGroupName
@@ -633,8 +633,8 @@ Resources:
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
+      Period: 60
+      EvaluationPeriods: 1
       Threshold: 20
       ComparisonOperator: LessThanThreshold
       Dimensions:
