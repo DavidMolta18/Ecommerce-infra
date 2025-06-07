@@ -1,0 +1,632 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Infraestructura E-commerce Node.js con Express y MySQL"
+
+Parameters:
+  Environment:
+    Description: 'Ambiente de despliegue'
+    Type: String
+    Default: 'prod'
+    AllowedValues: ['dev', 'staging', 'prod']
+  
+  EC2InstanceType:
+    Description: 'Tipo de instancia EC2 para servidores web'
+    Type: String
+    Default: 't2.small'
+    AllowedValues: ['t2.nano', 't2.micro', 't2.small', 't2.medium']
+
+  DBInstanceClass:
+    Description: 'Clase de instancia RDS'
+    Type: String
+    Default: 'db.t3.micro'
+    AllowedValues: ['db.t3.micro', 'db.t3.small', 'db.t3.medium']
+  
+  DatabaseName:
+    Description: 'Nombre de la base de datos'
+    Type: String
+    Default: 'ecommercedb'
+
+  DatabaseUsername:
+    Description: 'Usuario maestro de la base de datos'
+    Type: String
+    Default: 'admin'
+  
+  DatabasePassword:
+    Description: 'Contraseña de la base de datos (mínimo 8 caracteres)'
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    Default: 'MySecurePass123'
+
+  KeyPairName:
+    Description: 'Nombre del Key Pair existente para EC2'
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: 'vockey'
+  
+  AllowedCIDR:
+    Description: 'CIDR permitido para acceso SSH al bastion'
+    Type: String
+    Default: '0.0.0.0/0'
+
+  AlertEmail:
+    Description: 'Email para recibir alertas'
+    Type: String
+    Default: 'dmh1802@outlook.es'
+
+Mappings:
+  RegionAMI:
+    us-east-1:
+      AMI: 'ami-0f88e80871fd81e91'
+
+Resources:
+
+  CommerceVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '172.20.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-commerce-vpc'
+
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.0.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-public-subnet1'
+
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.1.0/24'
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-public-subnet2'
+
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.2.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-private-subnet1'
+
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.3.0/24'
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-private-subnet2'
+
+  DBSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.4.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-db-subnet1'
+
+  DBSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      CidrBlock: '172.20.5.0/24'
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-db-subnet2'
+
+  InternetGW:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-igw'
+
+  AttachGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      InternetGatewayId: !Ref InternetGW
+
+  NATGatewayEIP:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-nat-gw'
+
+  PublicRT:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-pub-rt'
+
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRT
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGW
+
+  PrivateRT:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref CommerceVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-priv-rt'
+
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRT
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway
+
+  PubAssoc1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRT
+
+  PubAssoc2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRT
+
+  PrivAssoc1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRT
+
+  PrivAssoc2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRT
+
+
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security Group para Application Load Balancer'
+      VpcId: !Ref CommerceVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+          Description: 'HTTP desde internet'
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+          Description: 'HTTPS desde internet'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-alb-sg'
+
+
+  WebServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security Group para servidores web Node.js'
+      VpcId: !Ref CommerceVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: 'HTTP desde ALB'
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: 'Node.js desde ALB'
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+          Description: 'SSH desde Bastion'
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-web-sg'
+
+ 
+  BastionSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security Group para Bastion Host'
+      VpcId: !Ref CommerceVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedCIDR
+          Description: 'SSH desde IP permitida'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-bastion-sg'
+
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: 'Subnet group para RDS MySQL'
+      SubnetIds:
+        - !Ref DBSubnet1
+        - !Ref DBSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-db-subnet-group'
+
+  MySQLDatabase:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub '${Environment}-mysql-db'
+      Engine: MySQL
+      EngineVersion: '8.0'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: false
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-mysql'
+
+
+  ApplicationLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Sub '${Environment}-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-alb'
+
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub '${Environment}-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref CommerceVPC
+      HealthCheckPath: '/login.html'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetType: instance
+
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+
+  BastionHost:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: 't2.micro'
+      ImageId: !FindInMap [RegionAMI, !Ref 'AWS::Region', AMI]
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y mysql
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-bastion'
+
+
+  WebServerLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: !Sub '${Environment}-web-lt'
+      LaunchTemplateData:
+        ImageId: !FindInMap [RegionAMI, !Ref 'AWS::Region', AMI]
+        InstanceType: !Ref EC2InstanceType
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              yum update -y
+              curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+              yum install -y nodejs git nginx
+
+              mkdir -p /opt/ecommerce
+              cd /opt/ecommerce
+              git clone https://github.com/DavidMolta18/Ecommerce-backend.git .
+
+              npm install
+
+              mkdir -p /var/www/html
+              cd /var/www/html
+              git clone https://github.com/DavidMolta18/Ecommerce-frontend.git .
+
+              cat > /etc/nginx/nginx.conf << 'EOF'
+              user nginx;
+              worker_processes auto;
+              error_log /var/log/nginx/error.log;
+              pid /run/nginx.pid;
+
+              events {
+                  worker_connections 1024;
+              }
+
+              http {
+                  include /etc/nginx/mime.types;
+                  default_type application/octet-stream;
+
+                  server {
+                      listen 80 default_server;
+                      server_name _;
+                      root /var/www/html;
+                      index login.html index.html;
+
+                      location / {
+                          try_files $uri $uri/ /login.html;
+                      }
+
+                      location /api/ {
+                          proxy_pass http://localhost:3000;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+                      }
+                  }
+              }
+              EOF
+
+              cd /opt/ecommerce
+              cat > .env << EOF
+              DB_HOST=${DBEndpoint}
+              DB_NAME=${DatabaseName}
+              DB_USER=${DatabaseUsername}
+              DB_PASSWORD=${DatabasePassword}
+              PORT=3000
+              EOF
+
+              cat > /etc/systemd/system/ecommerce.service << EOF
+              [Unit]
+              Description=E-commerce Node.js Application
+              After=network.target
+
+              [Service]
+              Type=simple
+              User=ec2-user
+              WorkingDirectory=/opt/ecommerce
+              ExecStart=/usr/bin/node server.js
+              Restart=always
+
+              [Install]
+              WantedBy=multi-user.target
+              EOF
+
+              chown -R ec2-user:ec2-user /opt/ecommerce
+              systemctl daemon-reload
+              systemctl enable ecommerce
+              systemctl start ecommerce
+              systemctl enable nginx
+              systemctl start nginx
+            - DBEndpoint: !GetAtt MySQLDatabase.Endpoint.Address
+              DatabaseName: !Ref DatabaseName
+              DatabaseUsername: !Ref DatabaseUsername
+              DatabasePassword: !Ref DatabasePassword
+
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AutoScalingGroupName: !Sub '${Environment}-asg'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServerLaunchTemplate
+        Version: !GetAtt WebServerLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 2
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-web-server'
+          PropagateAtLaunch: true
+
+
+  ScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: 1
+      PolicyType: SimpleScaling
+
+  ScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: -1
+      PolicyType: SimpleScaling
+
+
+  AlertTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: !Sub '${Environment}-alerts'
+      DisplayName: 'E-commerce Alerts'
+
+  EmailSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Protocol: email
+      TopicArn: !Ref AlertTopic
+      Endpoint: !Ref AlertEmail
+
+  HighCPUAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${Environment}-high-cpu'
+      AlarmDescription: 'CPU alta en el Auto Scaling Group'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 40
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      AlarmActions:
+        - !Ref ScaleUpPolicy
+        - !Ref AlertTopic
+
+  LowCPUAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${Environment}-low-cpu'
+      AlarmDescription: 'CPU baja en el Auto Scaling Group'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      AlarmActions:
+        - !Ref ScaleDownPolicy
+        - !Ref AlertTopic
+
+
+  CloudTrailLogsBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${Environment}-cloudtrail-logs-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudTrailBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref CloudTrailLogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailLogsBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${CloudTrailLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                's3:x-amz-acl': bucket-owner-full-control
+
+  CloudTrail:
+    Type: 'AWS::CloudTrail::Trail'
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: !Sub '${Environment}-activity-trail'
+      S3BucketName: !Ref CloudTrailLogsBucket
+      IsLogging: true
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: false
+      EnableLogFileValidation: true
+
+Outputs:
+  ApplicationURL:
+    Description: 'URL pública del Load Balancer'
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+    Export:
+      Name: !Sub '${Environment}-app-url'
+
+  BastionPublicIP:
+    Description: 'IP pública del Bastión Host'
+    Value: !GetAtt BastionHost.PublicIp
+    Export:
+      Name: !Sub '${Environment}-bastion-ip'
+
+  DatabaseEndpoint:
+    Description: 'Endpoint de la base de datos'
+    Value: !GetAtt MySQLDatabase.Endpoint.Address
+    Export:
+      Name: !Sub '${Environment}-db-endpoint'
